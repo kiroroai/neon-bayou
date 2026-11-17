@@ -1,124 +1,142 @@
-// The game's rules and state, with no drawing and no browser in it: the player's paddle, the
-// pool of falling blocks and coins, spawning, collisions, score, lives and level. step() advances
-// one fixed step and returns what happened as bit flags, so the caller can react without the
-// world knowing about screens or sound. Nothing here allocates after createWorld returns.
-import { BLOCK, COIN, FIELD, LEVEL, LIVES, PLAYER, POOL_SIZE } from './config.js';
+// Neon Bayou — the city of Cypress Bay: districts, roads, buildings,
+// bayou channel, lagoon, docks, and collision. One job: the map itself.
+import { WORLD_W, WORLD_H, ROAD_W, BAYOU_X1, BAYOU_X2, LAGOON_Y1, LAGOON_Y2, BRIDGE_YS, DISTRICTS, PALETTE } from './config.js';
+import { makeRng } from './rng.js';
 
-export const KIND_BLOCK = 0;
-export const KIND_COIN = 1;
+export const AVENUES = [480, 800, 1120, 1440, 1760, 2080, 2400, 2720, 3040];
+export const STREETS = [160, 480, 800, 1120, 1440, 1760, 2080];
 
-export const EVENT_HIT = 1;
-export const EVENT_COIN = 2;
-export const EVENT_OVER = 4;
+const SIGNS = ['NEON', 'BAYOU', '24H', 'HOTEL', 'BAR', 'CLUB', 'PIER', 'CAFE', 'MOTEL', 'DANCE', 'TACOS', 'CASH', 'GYM', 'LIQUOR', 'ARCADE', 'ROOMS'];
+const NEON_COLORS = ['#ff2e88', '#22d3ee', '#f59e0b', '#a3e635', '#c084fc', '#fbbf24', '#fb7185'];
 
-function overlaps(a, b) {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
-}
+export function buildWorld() {
+  const rng = makeRng(20261117);
+  const buildings = [];
+  const lamps = [];
+  const trees = [];
+  const billboards = [];
 
-export function createWorld(random) {
-  const player = { x: 0, y: FIELD.groundY - PLAYER.height, width: PLAYER.width, height: PLAYER.height, invulnerable: 0 };
-  const items = [];
-  for (let index = 0; index < POOL_SIZE; index += 1) {
-    items.push({ active: false, kind: KIND_BLOCK, x: 0, y: 0, width: 0, height: 0, speed: 0 });
-  }
-  const state = { player, items, score: 0, lives: LIVES, level: 1, elapsed: 0, blockTimer: 0, coinTimer: 0 };
-
-  function reset() {
-    player.x = (FIELD.width - player.width) / 2;
-    player.invulnerable = 0;
-    for (const item of items) item.active = false;
-    state.score = 0;
-    state.lives = LIVES;
-    state.level = 1;
-    state.elapsed = 0;
-    state.blockTimer = BLOCK.interval;
-    state.coinTimer = COIN.interval;
-  }
-
-  function freeItem() {
-    for (let index = 0; index < items.length; index += 1) if (!items[index].active) return items[index];
-    return null;
-  }
-
-  function spawnBlock() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_BLOCK;
-    item.width = BLOCK.minWidth + random() * (BLOCK.maxWidth - BLOCK.minWidth);
-    item.height = BLOCK.height;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = BLOCK.speed + BLOCK.speedPerLevel * (state.level - 1) + random() * BLOCK.speedJitter;
-  }
-
-  function spawnCoin() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_COIN;
-    item.width = COIN.size;
-    item.height = COIN.size;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = COIN.speed + COIN.speedPerLevel * (state.level - 1);
-  }
-
-  function blockInterval() {
-    return Math.max(BLOCK.minInterval, BLOCK.interval * BLOCK.intervalScale ** (state.level - 1));
-  }
-
-  /**
-   * One fixed step. `direction` is -1, 0 or 1 (left, still, right). With `harmless` set (the title
-   * screen's backdrop) things fall but nothing touches the player and nothing scores.
-   */
-  function step(dt, direction, harmless) {
-    let events = 0;
-    state.elapsed += dt;
-    state.level = Math.min(LEVEL.max, 1 + Math.floor(state.elapsed / LEVEL.seconds));
-
-    player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * dt));
-    if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
-
-    state.blockTimer -= dt;
-    if (state.blockTimer <= 0) {
-      spawnBlock();
-      state.blockTimer += blockInterval();
-    }
-    state.coinTimer -= dt;
-    if (state.coinTimer <= 0) {
-      spawnCoin();
-      state.coinTimer += COIN.interval + random() * COIN.intervalJitter;
-    }
-
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      item.y += item.speed * dt;
-      if (item.y > FIELD.groundY) {
-        item.active = false;
-        if (item.kind === KIND_BLOCK && !harmless) state.score += BLOCK.dodgePoints;
+  // Buildings fill the blocks between avenues and streets.
+  for (let i = 0; i < AVENUES.length - 1; i++) {
+    for (let j = 0; j < STREETS.length - 1; j++) {
+      const bx1 = AVENUES[i] + ROAD_W / 2 + 14;
+      const bx2 = AVENUES[i + 1] - ROAD_W / 2 - 14;
+      const by1 = STREETS[j] + ROAD_W / 2 + 14;
+      const by2 = STREETS[j + 1] - ROAD_W / 2 - 14;
+      const bw = bx2 - bx1, bh = by2 - by1;
+      // Magnolia Park block: trees and grass, no buildings.
+      if (i === 6 && j === 3) {
+        for (let t = 0; t < 14; t++) {
+          trees.push({ x: bx1 + rng.range(20, bw - 20), y: by1 + rng.range(20, bh - 20), r: rng.range(10, 18) });
+        }
         continue;
       }
-      if (harmless || !overlaps(item, player)) continue;
-      if (item.kind === KIND_COIN) {
-        item.active = false;
-        state.score += COIN.points;
-        events |= EVENT_COIN;
-      } else if (player.invulnerable === 0) {
-        item.active = false;
-        state.lives -= 1;
-        player.invulnerable = PLAYER.invulnerable;
-        events |= EVENT_HIT;
-        if (state.lives === 0) {
-          events |= EVENT_OVER;
-          break;
-        }
+      // Docks block: warehouses near the lagoon, low and wide.
+      const dockRow = j === STREETS.length - 2;
+      const count = dockRow ? 2 : rng.int(2, 3);
+      for (let k = 0; k < count; k++) {
+        const w = dockRow ? rng.range(120, 180) : rng.range(70, 130);
+        const h = dockRow ? rng.range(50, 70) : rng.range(60, 120);
+        const x = bx1 + rng.range(6, Math.max(7, bw - w - 6));
+        const y = by1 + rng.range(6, Math.max(7, bh - h - 6));
+        const district = DISTRICTS.find(d => x >= d.x1 && x < d.x2 && y >= d.y1 && y < d.y2);
+        buildings.push({
+          x, y, w, h,
+          color: PALETTE.buildingTop,
+          edge: PALETTE.buildingEdge,
+          neon: rng.pick(NEON_COLORS),
+          sign: rng.chance(0.75) ? rng.pick(SIGNS) : '',
+          district: district ? district.name : 'Cypress Bay',
+          roof: rng.pick(['#3b2d5c', '#2d3b5c', '#5c2d3b', '#2d5c3b']),
+        });
       }
     }
-    return events;
   }
 
-  reset();
-  return { state, reset, step };
+  // Lamps along every avenue and street intersection approach.
+  for (const ax of AVENUES) for (const sy of STREETS) {
+    lamps.push({ x: ax - ROAD_W / 2 - 6, y: sy - ROAD_W / 2 - 6 });
+    lamps.push({ x: ax + ROAD_W / 2 + 6, y: sy + ROAD_W / 2 + 6 });
+  }
+  // Trees along the bayou promenade and the park edge.
+  for (let y = 200; y < 2100; y += 130) trees.push({ x: 330 + rng.range(-8, 8), y, r: rng.range(10, 16) });
+  // Billboards on a few tall blocks.
+  billboards.push({ x: 1120, y: 480, w: 120, h: 26, text: 'NEON BAYOU', color: '#ff2e88' });
+  billboards.push({ x: 2080, y: 1440, w: 120, h: 26, text: 'VISIT CYPRESS BAY', color: '#22d3ee' });
+  billboards.push({ x: 800, y: 1760, w: 120, h: 26, text: 'GATOR COLA', color: '#a3e635' });
+
+  // Docks: piers reaching into the lagoon.
+  const piers = [];
+  for (let k = 0; k < 4; k++) piers.push({ x: 700 + k * 520, y: LAGOON_Y1, w: 60, h: 150 });
+
+  return {
+    avenues: AVENUES, streets: STREETS,
+    buildings, lamps, trees, billboards, piers,
+    spawn: { player: { x: 800, y: 720 }, garage: { x: 800, y: 800 } },
+  };
+}
+
+export function districtAt(x, y) {
+  for (const d of DISTRICTS) if (x >= d.x1 && x < d.x2 && y >= d.y1 && y < d.y2) return d;
+  if (x < BAYOU_X2) return { name: 'The Bayou', neon: '#22d3ee', tint: '#0b2a33' };
+  if (y >= LAGOON_Y1) return { name: 'The Lagoon', neon: '#38bdf8', tint: '#0b2a33' };
+  return { name: 'Cypress Bay', neon: '#ff2e88', tint: '#14101d' };
+}
+
+export function onBridge(x, y) {
+  if (x < BAYOU_X1 || x > BAYOU_X2) return false;
+  return BRIDGE_YS.some(by => Math.abs(y - by) <= ROAD_W / 2);
+}
+
+export function inWater(x, y) {
+  if (x >= BAYOU_X1 && x <= BAYOU_X2 && !onBridge(x, y)) return true;
+  if (y >= LAGOON_Y1 && y <= LAGOON_Y2) return true;
+  return false;
+}
+
+export function roadAt(x, y) {
+  if (x < 0 || y < 0 || x > WORLD_W || y > WORLD_H) return false;
+  for (const ax of AVENUES) if (Math.abs(x - ax) <= ROAD_W / 2) return true;
+  for (const sy of STREETS) if (Math.abs(y - sy) <= ROAD_W / 2) return true;
+  return false;
+}
+
+function circleHitsRect(x, y, r, b) {
+  const cx = Math.max(b.x, Math.min(x, b.x + b.w));
+  const cy = Math.max(b.y, Math.min(y, b.y + b.h));
+  const dx = x - cx, dy = y - cy;
+  return dx * dx + dy * dy < r * r;
+}
+
+export function solidAt(world, x, y, r) {
+  if (x < r || y < r || x > WORLD_W - r || y > WORLD_H - r) return true;
+  if (inWater(x, y)) return true;
+  for (const b of world.buildings) if (circleHitsRect(x, y, r, b)) return true;
+  return false;
+}
+
+// Move a circle by (dx, dy) with axis-separated sliding collision.
+export function moveWithCollision(world, e, dx, dy, r) {
+  const nx = e.x + dx;
+  if (!solidAt(world, nx, e.y, r)) e.x = nx;
+  const ny = e.y + dy;
+  if (!solidAt(world, e.x, ny, r)) e.y = ny;
+}
+
+export function nearestRoadPoint(x, y) {
+  let best = null, bestD = Infinity;
+  for (const ax of AVENUES) {
+    const d = Math.abs(x - ax);
+    if (d < bestD) { bestD = d; best = { x: ax, y }; }
+  }
+  for (const sy of STREETS) {
+    const d = Math.abs(y - sy);
+    if (d < bestD) { bestD = d; best = { x, y: sy }; }
+  }
+  return best;
+}
+
+export function randomRoadPoint(rng) {
+  if (rng.chance(0.5)) return { x: rng.pick(AVENUES), y: rng.range(200, 2050) };
+  return { x: rng.range(500, 3000), y: rng.pick(STREETS) };
 }
