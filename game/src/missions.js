@@ -77,6 +77,7 @@ function currentStep(M) {
 
 export function currentObjective(G) {
   const M = G.missions;
+  if (M.done) return { text: 'Free roam — Cypress Bay is yours.', x: null, y: null };
   const def = currentDef(M);
   if (!def) return { text: 'Free roam — Cypress Bay is yours.', x: null, y: null };
   const step = currentStep(M);
@@ -148,12 +149,13 @@ function completeStep(G) {
     G.stats.missionsDone++;
     G.audio.mission();
     M.banner = { text: `${def.name} complete — $${cash} earned`, t: 4 };
-    G.saveProgress();
     if (M.index + 1 < MISSIONS.length) startMission(G, M.index + 1);
     else {
       M.done = true;
       M.banner = { text: 'STORY COMPLETE — Cypress Bay is yours, Rook.', t: 6 };
     }
+    // Save AFTER advancing, so Continue resumes the next mission, not the one just finished.
+    G.saveProgress();
   } else {
     startStep(G);
   }
@@ -161,6 +163,7 @@ function completeStep(G) {
 
 export function updateMissions(G, dt) {
   const M = G.missions;
+  if (M.done) return;
   const def = currentDef(M);
   if (!def) return;
   const step = currentStep(M);

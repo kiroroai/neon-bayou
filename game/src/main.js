@@ -9,7 +9,7 @@ import { createPlayer, updatePlayerOnFoot, enterCar, exitCar, nearestEnterableCa
 import { createCar, updatePlayerCar, updateTraffic, spawnParkedCars, spawnTraffic } from './vehicles.js';
 import { spawnPeds, updatePeds } from './pedestrians.js';
 import { createPolice, addWanted, updatePolice } from './police.js';
-import { createMissions, startMission, updateMissions, currentObjective } from './missions.js';
+import { MISSIONS, createMissions, startMission, updateMissions, currentObjective } from './missions.js';
 import { createCombat, updateCombat } from './combat.js';
 import { createEffects, updateEffects, addShake } from './effects.js';
 import { drawHUD } from './hud.js';
@@ -46,6 +46,7 @@ function createGame(canvas) {
     cash: G.player.cash,
     missionIndex: G.missions.index,
     missionsDone: G.stats.missionsDone,
+    done: G.missions.done,
   });
   spawnParkedCars(G);
   spawnTraffic(G);
@@ -77,7 +78,13 @@ function continueGame(G) {
   G.combat = createCombat();
   G.stats = { missionsDone: (s && s.missionsDone) || 0, carsStolen: 0, cashEarned: 0 };
   G.state = 'playing';
-  startMission(G, (s && s.missionIndex) || 0);
+  if (s && s.done) {
+    // Story finished: free roam, no mission to start.
+    G.missions.done = true;
+    G.missions.index = MISSIONS.length - 1;
+  } else {
+    startMission(G, (s && s.missionIndex) || 0);
+  }
   G.audio.unlock();
   G.audio.startMusic();
 }
@@ -129,7 +136,7 @@ function applyStage(G, stage) {
     startMission(G, 4);
     G.missions.banner = null;
   } else if (stage === 'bayou') {
-    const car = createCar('gator', 700, 1900, -Math.PI / 2, 'player');
+    const car = createCar('gator', 480, 1900, -Math.PI / 2, 'player');
     G.cars.push(car);
     p.inCar = car;
     car.speed = 120;
